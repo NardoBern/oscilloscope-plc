@@ -59,7 +59,7 @@ function initCharts() {
                     speed: 20,
                 },
                 limits: {
-                    x: {min: 0, max: 1000},
+                    x: {min: 'original', max: 'original'},
                 }
             }
         },
