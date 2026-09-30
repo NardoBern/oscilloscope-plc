@@ -1,130 +1,103 @@
-# 📊 Oscilloscopio PLC - Rockwell CompactLogix 5380
+# Oscilloscopio con simulatore integrato
 
-Software oscilloscopio per la visualizzazione in tempo reale di dati campionati da un PLC Rockwell CompactLogix 5380.
+Interfaccia web per visualizzare, in tempo reale, segnali campionati ciclicamente.
+Il campionamento è prodotto da un simulatore che riproduce il comportamento di un
+task periodico di un controller PLC, completo di protocollo di handshake.
 
-## 🚀 Avvio Rapido
-
-### 1. Installa le dipendenze
-
-```bash
-pip install flask flask-socketio pycomm3
-```
-
-### 2. Avvia il server
+## Avvio
 
 ```bash
+pip install -r requirements.txt
 python main.py
 ```
 
-### 3. Apri il browser
+Poi apri **http://localhost:5000**
 
-Vai su: **http://localhost:5000**
+## Cosa fa
 
-## 📋 Funzionalità
+Il simulatore genera due segnali a frequenza costante e li campiona in blocchi:
 
-- ✅ **Visualizzazione in tempo reale** di segnali analogici e digitali
-- ✅ **Simulatore PLC integrato** per test senza hardware
-- ✅ **Interfaccia web moderna** con grafici interattivi
-- ✅ **Handshake sincronizzato** tra software e PLC
-- ✅ **Frequenza di campionamento** fino a 1 kHz
-- ✅ **Buffer circolare** da 1000 campioni
+- **Canale analogico** — sinusoide con rumore sovrapposto
+- **Canale digitale** — onda quadra
 
-## 🔧 Configurazione
+Ogni volta che un blocco si riempie, viene congelato in un buffer separato e
+l'acquisizione si mette in pausa finché il client non conferma la lettura.
+Questo garantisce che chi legge non trovi mai dati che cambiano sotto i piedi.
 
-Modifica `config.py` per personalizzare:
+I campioni si accumulano in un buffer circolare fino a 100.000 valori, così è
+possibile tornare indietro e rivedere la parte di segnale già trascorsa.
+
+## Comandi
+
+| Pulsante | Effetto |
+|----------|---------|
+| **Avvia / Ferma** | Avvia o sospende il campionamento |
+| **Svuota buffer** | Cancella i campioni accumulati |
+| **+ / − / Reset** | Zoom avanti, indietro, vista completa |
+| **← / →** | Scorrimento orizzontale |
+| **Zoom / Pan / Finestra** | Modalità di interazione col mouse |
+
+Con la rotella si zooma sempre. Trascinando si effettua il pan, oppure si
+trascina un rettangolo di selezione, a seconda della modalità attiva.
+
+I due grafici sono sincronizzati: la vista di uno segue quella dell'altro.
+
+## Configurazione
+
+Tutti i parametri sono in `config.py`:
 
 ```python
-# Indirizzo IP del PLC
-PLC_CONFIG = {
-    'ip_address': '192.168.1.10',
-    'slot': 0,
+SAMPLE_CONFIG = {
+    'array_size': 1000,        # campioni per blocco
+    'sample_rate_hz': 1000,    # frequenza di campionamento
 }
 
-# Abilita/disabilita simulatore
 SIMULATOR_CONFIG = {
-    'enabled': True,  # False per usare il PLC reale
+    'noise_level': 0.1,              # ampiezza del rumore
+    'signal_frequency_hz': 50,       # frequenza della sinusoide
+    'digital_frequency_hz': 10,      # frequenza dell'onda quadra
+}
+
+BUFFER_CONFIG = {
+    'max_samples': 100000,     # capacità del buffer circolare
+    'poll_interval': 0.001,    # intervallo di controllo del buffer
 }
 ```
 
-## 🏗️ Architettura
+## Struttura del progetto
 
 ```
-oscilloscope_plc/
-├── main.py                 # Entry point
-├── config.py               # Configurazione
-├── plc_communication.py    # Comunicazione PLC
-├── simulator.py            # Simulatore PLC
-├── web_server.py           # Server web Flask
+.
+├── main.py                 Avvio
+├── config.py               Parametri centralizzati
+├── simulator.py            Generazione segnali e task di campionamento
+├── data_acquisition.py     Polling, handshake e buffer circolare
+├── web_server.py           Server Flask e WebSocket
 ├── static/
-│   ├── style.css           # Stili CSS
-│   └── app.js              # Logica frontend
+│   ├── app.js              Grafici e controlli
+│   └── style.css           Stile
 └── templates/
-    └── index.html          # Interfaccia web
+    └── index.html          Interfaccia
 ```
 
-## 🔌 Connessione al PLC Reale
+## Note sul simulatore
 
-1. Installa `pycomm3`:
-   ```bash
-   pip install pycomm3
-   ```
+Il task di campionamento usa `time.perf_counter()` come base temporale anziché
+`time.time()`: è monotono e immune alle rettifiche dell'ora di sistema, che
+farebbero saltare indietro le etichette temporali.
 
-2. Modifica `config.py`:
-   ```python
-   SIMULATOR_CONFIG = {
-       'enabled': False,
-   }
-   ```
+Il rumore è generato da una funzione sinusoidale ad alta frequenza invece che
+dallo stato globale di `random`. Serve a evitare che il simulato si comporti in
+modo diverso a ogni esecuzione, così i confronti fra due sessioni sono riproducibili.
 
-3. Configura i tag nel PLC (Studio 5000):
+## Note sul progetto originale
 
-   | Nome Tag | Tipo | Descrizione |
-   |----------|------|-------------|
-   | `OSCILLOSCOPE.Array_Analogici` | REAL[1000] | Buffer dati analogici |
-   | `OSCILLOSCOPE.Array_Digitali` | DINT[1000] | Buffer dati digitali |
-   | `OSCILLOSCOPE.Dati_Pronti` | BOOL | Flag dati pronti |
-   | `OSCILLOSCOPE.Lettura_Completa` | BOOL | Flag lettura completata |
-   | `OSCILLOSCOPE.Indice` | DINT | Indice di campionamento |
-   | `OSCILLOSCOPE.Timestamp` | DINT | Timestamp (ms) |
-   | `OSCILLOSCOPE.Sample_Count` | DINT | Contatore campioni |
+Questo progetto è nato per visualizzare dati da un PLC Rockwell. La parte di
+comunicazione con il controller non è inclusa: il controller scelto per i test
+era una ControlLogix L306, con 2,5 MB di memoria totali, e l'allocazione degli
+array di campionamento lo avrebbe portato a saturazione. Su un controller con
+memoria adeguata l'approccio resterebbe valido e l'interfaccia non cambierebbe.
 
-## 📡 Protocollo di Handshake
+## Licenza
 
-```
-┌─────────────┐                    ┌─────────────┐
-│             │  Dati_Pronti=1     │             │
-│    PLC      │ ─────────────────> │ Oscilloscopio│
-│             │                    │             │
-│             │  Lettura_Completa=1│             │
-│             │ <───────────────── │             │
-└─────────────┘                    └─────────────┘
-```
-
-1. Il PLC campiona i dati e li scrive in un buffer
-2. Quando il buffer è pieno, imposta `Dati_Pronti = 1`
-3. L'oscilloscopio legge i dati e imposta `Lettura_Completa = 1`
-4. Il PLC resetta i flag e ricomincia il campionamento
-
-## 🛠️ Sviluppo
-
-### Struttura del progetto
-
-- **Backend**: Python + Flask + WebSocket
-- **Frontend**: HTML + CSS + JavaScript + Chart.js
-- **Comunicazione**: EtherNet/IP via pycomm3
-
-### Estensioni future
-
-- [ ] Trigger configurabile
-- [ ] Esportazione dati (CSV, JSON)
-- [ ] Multi-canale
-- [ ] Allarmi e soglie
-- [ ] Storico dati
-
-## 📄 Licenza
-
-Progetto dimostrativo per scopi educativi.
-
----
-
-**Buon oscilloscopio!** 📈
+MIT

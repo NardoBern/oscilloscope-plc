@@ -1,157 +1,143 @@
 """
-Server Web per l'oscilloscopio PLC
-Fornisce un'interfaccia web con grafici in tempo reale via WebSocket.
+Server web dell'oscilloscopio.
+
+Espone l'interfaccia sulla porta configurata e inoltra i blocchi di
+dati al browser tramite WebSocket.
 """
-import json
 import time
-import threading
-from flask import Flask, render_template, jsonify, request
-from flask_socketio import SocketIO, emit
-from config import WEB_CONFIG, SAMPLE_CONFIG
-from plc_communication import PLCCommunication
+
+from flask import Flask, jsonify, render_template
+from flask_socketio import SocketIO
+
+from config import WEB_CONFIG
+from data_acquisition import DataAcquisition
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'oscilloscope_plc_secret'
+app.config['SECRET_KEY'] = 'oscilloscopio-simulatore'
+
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
-# Istanza globale della comunicazione PLC
-plc_comm = PLCCommunication()
+acquisition = DataAcquisition()
 
-# Stato dell'oscilloscopio
-oscilloscope_state = {
-    'running': False,
-    'triggered': False,
-    'sample_count': 0,
+# Stato esposto all'interfaccia
+stato = {
+    'acquiring': False,
+    'blocks': 0,
     'last_update': None,
 }
 
 
+# ----------------------------------------------------------------------
+# API REST
+# ----------------------------------------------------------------------
+
 @app.route('/')
 def index():
-    """Pagina principale."""
+    """Interfaccia web."""
     return render_template('index.html')
 
 
 @app.route('/api/status')
 def api_status():
-    """API per lo stato del sistema."""
+    """Stato di acquisizione e configurazione."""
     return jsonify({
-        'plc': plc_comm.get_status(),
-        'oscilloscope': oscilloscope_state,
-        'config': {
-            'array_size': SAMPLE_CONFIG['array_size'],
-            'sample_rate': SAMPLE_CONFIG['sample_rate_hz'],
-        }
+        'acquiring': stato['acquiring'],
+        'blocks': stato['blocks'],
+        'last_update': stato['last_update'],
+        'acquisition': acquisition.get_status(),
     })
 
 
 @app.route('/api/start', methods=['POST'])
 def api_start():
     """Avvia l'acquisizione."""
-    if not plc_comm.connected:
-        plc_comm.connect()
-    
-    if not oscilloscope_state['running']:
-        plc_comm.start_polling()
-        oscilloscope_state['running'] = True
-    
-    return jsonify({'success': True, 'message': 'Acquisizione avviata'})
+    if not stato['acquiring']:
+        acquisition.start()
+        stato['acquiring'] = True
+    return jsonify({'ok': True, 'acquiring': stato['acquiring']})
 
 
 @app.route('/api/stop', methods=['POST'])
 def api_stop():
     """Ferma l'acquisizione."""
-    oscilloscope_state['running'] = False
-    plc_comm.stop_polling()
-    return jsonify({'success': True, 'message': 'Acquisizione fermata'})
+    if stato['acquiring']:
+        acquisition.stop()
+        stato['acquiring'] = False
+    return jsonify({'ok': True, 'acquiring': stato['acquiring']})
 
 
-@app.route('/api/data')
-def api_data():
-    """API per l'ultimo blocco di dati."""
-    data = plc_comm.get_last_data()
-    if data:
-        return jsonify(data)
-    return jsonify({'error': 'Nessun dato disponibile'}), 404
-
-
-@socketio.on('connect')
-def handle_connect():
-    """Gestione connessione WebSocket."""
-    print('[WEB] Client connesso')
-    emit('status', {'message': 'Connesso al server'})
-
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    """Gestione disconnessione WebSocket."""
-    print('[WEB] Client disconnesso')
-
+# ----------------------------------------------------------------------
+# WebSocket
+# ----------------------------------------------------------------------
 
 @socketio.on('start_acquisition')
-def handle_start_acquisition():
-    """Avvia l'acquisizione via WebSocket."""
-    if not plc_comm.connected:
-        plc_comm.connect()
-    
-    if not oscilloscope_state['running']:
-        plc_comm.start_polling()
-        oscilloscope_state['running'] = True
-    
-    emit('acquisition_started', {'success': True})
+def ws_start():
+    if not stato['acquiring']:
+        acquisition.start()
+        stato['acquiring'] = True
+    socketio.emit('acquisition_state', {'acquiring': True})
 
 
 @socketio.on('stop_acquisition')
-def handle_stop_acquisition():
-    """Ferma l'acquisizione via WebSocket."""
-    oscilloscope_state['running'] = False
-    plc_comm.stop_polling()
-    emit('acquisition_stopped', {'success': True})
+def ws_stop():
+    if stato['acquiring']:
+        acquisition.stop()
+        stato['acquiring'] = False
+    socketio.emit('acquisition_state', {'acquiring': False})
 
 
-def broadcast_data(data):
+@socketio.on('clear_buffer')
+def ws_clear():
+    acquisition.clear()
+    socketio.emit('buffer_cleared')
+
+
+# ----------------------------------------------------------------------
+# Flusso dati
+# ----------------------------------------------------------------------
+
+def on_block(blocco):
     """
-    Invia i dati a tutti i client connessi via WebSocket.
+    Callback invocata dal thread di acquisizione a ogni blocco ricevuto.
+
+    Invia l'intero buffer al browser, cosi' zoom e pan possono navigare
+    anche i campioni precedenti.
     """
-    socketio.emit('new_data', data)
+    stato['blocks'] = acquisition.blocks_received
+    stato['last_update'] = time.time()
+
+    analog, digital = acquisition.get_all_samples()
+    socketio.emit('samples', {
+        'analog': analog,
+        'digital': digital,
+        'total': len(analog),
+        'blocks': stato['blocks'],
+        'sample_rate': acquisition.simulator.sample_rate,
+    })
 
 
-def data_callback(data):
-    """
-    Callback chiamata quando ci sono nuovi dati dal PLC.
-    """
-    oscilloscope_state['sample_count'] = data.get('sample_count', 0)
-    oscilloscope_state['last_update'] = time.time()
-    
-    # Invia tutti i dati accumulati via WebSocket
-    all_data = plc_comm.get_all_data()
-    broadcast_data(all_data)
-    
-    # Segnala che la lettura è completa
-    plc_comm.signal_read_complete()
+acquisition.on_block = on_block
 
 
-def run_server():
-    """
-    Avvia il server web.
-    """
-    print(f"[WEB] Avvio server su {WEB_CONFIG['host']}:{WEB_CONFIG['port']}")
-    socketio.run(
-        app,
-        host=WEB_CONFIG['host'],
-        port=WEB_CONFIG['port'],
-        debug=WEB_CONFIG['debug'],
-        allow_unsafe_werkzeug=True
-    )
+def run():
+    """Avvia il server."""
+    print("=" * 62)
+    print("  Oscilloscopio con simulatore integrato")
+    print("=" * 62)
+    print("  Indirizzo: http://localhost:{}".format(WEB_CONFIG['port']))
+    print("  Frequenza: {} Hz".format(acquisition.simulator.sample_rate))
+    print("  Blocchi da: {} campioni".format(acquisition.simulator.array_size))
+    print("  Ctrl+C per arrestare")
+    print("-" * 62)
 
-
-# Registra il callback per i nuovi dati
-plc_comm.on_data_ready = data_callback
-
-if __name__ == '__main__':
     try:
-        run_server()
-    except KeyboardInterrupt:
-        print("\n[WEB] Arresto server...")
+        socketio.run(
+            app,
+            host=WEB_CONFIG['host'],
+            port=WEB_CONFIG['port'],
+            debug=WEB_CONFIG['debug'],
+            allow_unsafe_werkzeug=True,
+        )
     finally:
-        plc_comm.disconnect()
+        acquisition.disconnect()
+        print("\nChiusura completata")

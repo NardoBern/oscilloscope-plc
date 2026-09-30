@@ -3,90 +3,119 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Oscilloscopio PLC - Rockwell CompactLogix 5380</title>
-    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <title>Oscilloscopio - Simulatore PLC</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <div class="container">
+
         <header>
-            <h1>📊 Oscilloscopio PLC</h1>
-            <p>Rockwell CompactLogix 5380 — Monitoraggio in tempo reale</p>
+            <h1>Oscilloscopio</h1>
+            <p class="sub">Simulatore di campionamento ciclico con interfaccia web</p>
         </header>
 
-        <div class="status-bar">
-            <div class="status-item">
-                <span class="label">Stato:</span>
-                <span id="connection-status" class="status disconnected">Disconnesso</span>
+        <div class="bar">
+            <div class="cell">
+                <span class="label">Server</span>
+                <span id="connection-status" class="badge off">Disconnesso</span>
             </div>
-            <div class="status-item">
-                <span class="label">Campioni:</span>
-                <span id="sample-count">0</span>
+            <div class="cell">
+                <span class="label">Acquisizione</span>
+                <span id="acq-state" class="badge off">Ferma</span>
             </div>
-            <div class="status-item">
-                <span class="label">Frequenza:</span>
-                <span>1 kHz</span>
+            <div class="cell">
+                <span class="label">Frequenza</span>
+                <span id="sample-rate" class="value">-</span>
             </div>
-            <div class="status-item">
-                <span class="label">Buffer:</span>
-                <span>1000 valori</span>
+            <div class="cell">
+                <span class="label">Campioni</span>
+                <span id="sample-count" class="value">0</span>
+            </div>
+            <div class="cell">
+                <span class="label">Blocchi</span>
+                <span id="block-count" class="value">0</span>
             </div>
         </div>
 
         <div class="controls">
-            <button id="btn-start" class="btn btn-start" onclick="startAcquisition()">
-                ▶ Avvia Acquisizione
+            <button id="btn-start" class="btn primary" onclick="startAcquisition()">
+                Avvia
             </button>
-            <button id="btn-stop" class="btn btn-stop" onclick="stopAcquisition()" disabled>
-                ⏹ Ferma Acquisizione
+            <button id="btn-stop" class="btn danger" onclick="stopAcquisition()" disabled>
+                Ferma
             </button>
-            <button id="btn-clear" class="btn btn-clear" onclick="clearCharts()">
-                🗑 Pulisci Grafici
+            <button class="btn ghost" onclick="clearBuffer()">
+                Svuota buffer
+            </button>
+
+            <span class="separator"></span>
+
+            <button class="btn ghost" onclick="zoomBy(1.5)" title="Ingrandisci">
+                +
+            </button>
+            <button class="btn ghost" onclick="zoomBy(0.67)" title="Riduci">
+                &minus;
+            </button>
+            <button class="btn ghost" onclick="resetView()" title="Vista completa">
+                Reset
+            </button>
+
+            <span class="separator"></span>
+
+            <button class="btn ghost" onclick="panBy(-100)" title="Scorri a sinistra">
+                &larr;
+            </button>
+            <button class="btn ghost" onclick="panBy(100)" title="Scorri a destra">
+                &rarr;
+            </button>
+
+            <span class="separator"></span>
+
+            <button class="btn mode attivo" data-mode="zoom" onclick="setMode('zoom')">
+                Zoom
+            </button>
+            <button class="btn mode" data-mode="pan" onclick="setMode('pan')">
+                Pan
+            </button>
+            <button class="btn mode" data-mode="select" onclick="setMode('select')">
+                Finestra
             </button>
         </div>
 
-        <div class="zoom-controls">
-            <div class="zoom-group">
-                <span class="zoom-label">🔍 Zoom:</span>
-                <button class="btn-zoom" onclick="zoomIn()" title="Zoom Avanti">➕</button>
-                <button class="btn-zoom" onclick="zoomOut()" title="Zoom Indietro">➖</button>
-                <button class="btn-zoom" onclick="resetZoom()" title="Reset Zoom">🔄</button>
-            </div>
-            <div class="zoom-group">
-                <span class="zoom-label">↔️ Pan:</span>
-                <button class="btn-zoom" onclick="panLeft()" title="Scorri a Sinistra">⬅️</button>
-                <button class="btn-zoom" onclick="panRight()" title="Scorri a Destra">➡️</button>
-            </div>
-            <div class="zoom-group">
-                <span class="zoom-label">📐 Modalità:</span>
-                <button id="btn-mode-zoom" class="btn-mode active" onclick="setMode('zoom')" title="Zoom con Mouse">🔍 Zoom</button>
-                <button id="btn-mode-pan" class="btn-mode" onclick="setMode('pan')" title="Pan con Mouse">✋ Pan</button>
-                <button id="btn-mode-select" class="btn-mode" onclick="setMode('select')" title="Selezione Finestra">⬚ Seleziona</button>
-            </div>
+        <div class="charts">
+            <section class="chart-card">
+                <h2>Canale analogico</h2>
+                <div class="canvas-wrap">
+                    <canvas id="analog-chart"></canvas>
+                </div>
+            </section>
+
+            <section class="chart-card">
+                <h2>Canale digitale</h2>
+                <div class="canvas-wrap">
+                    <canvas id="digital-chart"></canvas>
+                </div>
+            </section>
         </div>
 
-        <div class="charts-container">
-            <div class="chart-wrapper">
-                <h2>📈 Segnale Analogico</h2>
-                <canvas id="analog-chart"></canvas>
-            </div>
-            <div class="chart-wrapper">
-                <h2>📊 Segnale Digitale</h2>
-                <canvas id="digital-chart"></canvas>
-            </div>
-        </div>
+        <footer class="notes">
+            <dl>
+                <dt>Blocco</dt>
+                <dd><span id="block-size">-</span></dd>
+                <dt>Capacita' buffer</dt>
+                <dd><span id="buffer-limit">-</span> campioni</dd>
+                <dt>Rotella</dt>
+                <dd>zoom</dd>
+                <dt>Trascina</dt>
+                <dd>pan oppure finestra, secondo la modalita'</dd>
+            </dl>
+        </footer>
 
-        <div class="info-panel">
-            <h3>ℹ️ Informazioni</h3>
-            <p><strong>PLC:</strong> Rockwell CompactLogix 5380</p>
-            <p><strong>Protocollo:</strong> EtherNet/IP</p>
-            <p><strong>Modalità:</strong> <span id="mode-info">Simulatore</span></p>
-            <p><strong>Ultimo aggiornamento:</strong> <span id="last-update">-</span></p>
-        </div>
     </div>
 
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
     <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>
