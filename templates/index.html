@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Oscilloscopio PLC - Rockwell CompactLogix 5380</title>
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📊 Oscilloscopio PLC</h1>
+            <p>Rockwell CompactLogix 5380 — Monitoraggio in tempo reale</p>
+        </header>
+
+        <div class="status-bar">
+            <div class="status-item">
+                <span class="label">Stato:</span>
+                <span id="connection-status" class="status disconnected">Disconnesso</span>
+            </div>
+            <div class="status-item">
+                <span class="label">Campioni:</span>
+                <span id="sample-count">0</span>
+            </div>
+            <div class="status-item">
+                <span class="label">Frequenza:</span>
+                <span>1 kHz</span>
+            </div>
+            <div class="status-item">
+                <span class="label">Buffer:</span>
+                <span>1000 valori</span>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button id="btn-start" class="btn btn-start" onclick="startAcquisition()">
+                ▶ Avvia Acquisizione
+            </button>
+            <button id="btn-stop" class="btn btn-stop" onclick="stopAcquisition()" disabled>
+                ⏹ Ferma Acquisizione
+            </button>
+            <button id="btn-clear" class="btn btn-clear" onclick="clearCharts()">
+                🗑 Pulisci Grafici
+            </button>
+        </div>
+
+        <div class="zoom-controls">
+            <div class="zoom-group">
+                <span class="zoom-label">🔍 Zoom:</span>
+                <button class="btn-zoom" onclick="zoomIn()" title="Zoom Avanti">➕</button>
+                <button class="btn-zoom" onclick="zoomOut()" title="Zoom Indietro">➖</button>
+                <button class="btn-zoom" onclick="resetZoom()" title="Reset Zoom">🔄</button>
+            </div>
+            <div class="zoom-group">
+                <span class="zoom-label">↔️ Pan:</span>
+                <button class="btn-zoom" onclick="panLeft()" title="Scorri a Sinistra">⬅️</button>
+                <button class="btn-zoom" onclick="panRight()" title="Scorri a Destra">➡️</button>
+            </div>
+            <div class="zoom-group">
+                <span class="zoom-label">📐 Modalità:</span>
+                <button id="btn-mode-zoom" class="btn-mode active" onclick="setMode('zoom')" title="Zoom con Mouse">🔍 Zoom</button>
+                <button id="btn-mode-pan" class="btn-mode" onclick="setMode('pan')" title="Pan con Mouse">✋ Pan</button>
+                <button id="btn-mode-select" class="btn-mode" onclick="setMode('select')" title="Selezione Finestra">⬚ Seleziona</button>
+            </div>
+        </div>
+
+        <div class="charts-container">
+            <div class="chart-wrapper">
+                <h2>📈 Segnale Analogico</h2>
+                <canvas id="analog-chart"></canvas>
+            </div>
+            <div class="chart-wrapper">
+                <h2>📊 Segnale Digitale</h2>
+                <canvas id="digital-chart"></canvas>
+            </div>
+        </div>
+
+        <div class="info-panel">
+            <h3>ℹ️ Informazioni</h3>
+            <p><strong>PLC:</strong> Rockwell CompactLogix 5380</p>
+            <p><strong>Protocollo:</strong> EtherNet/IP</p>
+            <p><strong>Modalità:</strong> <span id="mode-info">Simulatore</span></p>
+            <p><strong>Ultimo aggiornamento:</strong> <span id="last-update">-</span></p>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
